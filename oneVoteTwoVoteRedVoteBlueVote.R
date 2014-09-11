@@ -208,7 +208,7 @@ party_ctl <- read.table(
 
   Party           Colour   Contrast Include  Side  Electorate
   ACT             #FFCB05  #FFFF80    Y        n        1
-  Conservative    #00AEEF  #33CCFF    Y        n        0
+  Conservative    #00AEEF  #77CCFF    Y        n        0
   Destiny         #FF0000  #000000
   Green           #098137  #B3FFB3    Y        l        0
   Labour          #FF0000  #FFBAA8    Y        l       22
@@ -271,7 +271,7 @@ showAGraph(prop.table(table(outcomes)),poll_source_description)
 party_votes <- c(0.6, 3.0, 10.7, 29.9, 0.9, 1.2, 44.1, 7.9, 0.6)
 party_cis   <- c(0.3, 0.4,  1.3,  1.8, 0.2, 0.5,  2.0, 0.9, 0.1)
 
-many_elections <- 1000
+many_elections <- 10000
 outcomes <- rep("", many_elections)
 seats <- matrix(0, many_elections, nrow(party))
 for (i in 1:many_elections)
@@ -285,3 +285,230 @@ print(prop.table(table(outcomes)))
 
 plot_seats(seats, party)
 plot_scenarios(seats, party)
+
+l <- rowSums(seats[,party$Side=="l"])
+r <- rowSums(seats[,party$Side=="n"])
+
+png("leftright.png", width=600, height=600)
+fontsize <- 1.3
+par(mai=c(1,1,0.5, 0.5))
+lim1 <- 40
+lim2 <- 70
+cut  <- 60.5
+tot  <- 121
+plot(NULL, xlim=c(lim1, lim2), ylim=c(lim1, lim2), xaxs="i", yaxs="i", xlab="Left", ylab="Right", xaxt="n", yaxt="n", bty="n", cex.lab=fontsize)
+polygon(c(lim1, lim1, tot-lim2, 121-cut), c(cut, lim2, lim2, cut), col="#CCDDFF4F", border=NA)
+polygon(c(cut, cut, lim2, lim2), c(lim1, tot-cut, tot-lim2, lim1), col="#FFBAA84F", border=NA)
+abline(121,-1)
+points(jitter(l,2), jitter(r,2), col="#0000003F")
+lhist <- hist(l,breaks=lim1:lim2-0.5,plot=F)
+rhist <- hist(r,breaks=lim1:lim2-0.5,plot=F)
+lcol <- c("#FF00007F", "#FF0000")
+rcol <- c("#00529F7F", "#00529F")
+barplot(lhist$density*10, axes=F, space=c(lhist$breaks[1],rep(0,lim2-lim1-1)), border=NA, col=lcol[(lhist$mid > cut) + 1], add=T, offset=lim1)
+barplot(rhist$density*10, axes=F, space=c(rhist$breaks[1],rep(0,lim2-lim1-1)), horiz=T, border=NA, col=rcol[(rhist$mid > cut) + 1], add=T, offset=lim1)
+axis(1, cex.axis=fontsize)
+axis(2, cex.axis=fontsize)
+segments(lim1, lim2, 121-lim2, lim2, xpd=T)
+segments(lim2, 121-lim2, lim2, lim1, xpd=T)
+dev.off()
+
+
+# Pairs plot of party vote share
+include <- c("Labour", "National", "Green", "NZ First", "Conservative")
+
+get_party_data(include[1])
+b <- rbind(0, bias)
+rownames(b) <- c(rownames(bias), "Election")
+
+poll <- z
+results <- matrix(NA, length(x), length(include))
+colnames(results) <- include
+rownames(results) <- x
+for (i in include)
+{
+  get_party_data(i);
+  results[as.character(x),i] <- y
+  # optionally bias correct
+  results[,i] <- results[,i] - b[poll,i]
+}
+
+# figure out the expected correlation based on mean results
+r <- colMeans(results, na.rm=T)
+r <- r / sum(r)
+
+corr <- matrix(0, 10000, length(r)*length(r))
+for (i in 1:10000)
+{
+  p <- rdirichlet(nrow(results), r)
+  corr[i,] <- as.numeric(cor(p))
+}
+cl <- matrix(apply(corr, 2, quantile, 0.025), 5, 5)
+ch <- matrix(apply(corr, 2, quantile, 0.975), 5, 5)
+
+p <- matrix(0, 5, 5)
+for (i in 1:5)
+{
+  for (j in 1:5)
+  {
+    rs <- cor(results[,i], results[,j], use="complete.obs")
+    p[i,j] <- min(sum(corr[,(i-1)*length(r)+j] > rs), sum(corr[,(i-1)*length(r)+j] < rs))
+  }
+}
+p <- p / 10000
+
+
+count <- 1
+varx <- c(1,1,2,1,2,3,1,2,3,4)
+vary <- c(2,3,3,4,4,4,5,5,5,5)
+
+corr_panel <- function(x,y,...) {
+  x1 <- x[!is.na(x)]
+  y1 <- y[!is.na(y)]
+  # extend the range by 4%
+  xr <- range(x1) + c(-1,1)*diff(range(x1))*.04
+  yr <- range(y1) + c(-1,1)*diff(range(y1))*.04
+  r_samp <- cor(x,y, use="complete.obs")
+
+  var1 <- varx[count] #which (r == mean(x, na.rm=T))
+  var2 <- vary[count] #which (r == mean(y, na.rm=T))
+  count <<- count + 1
+  if (p[var1, var2] < 0.05) {
+    col <- c(.5,.65,.85)
+  } else {
+    col <- c(.7,.8,.9)
+  }
+  rect(xr[1], yr[1], xr[2], yr[2], col=grey(col[3]), border=NA)
+  text(mean(xr), mean(yr), sprintf("%0.2f", cor(x,y, use="complete.obs")),cex=2*2, col=grey(col[1]))
+  text(mean(xr), mean(yr)-diff(yr)/3, sprintf("(%0.2f,%0.2f)", cl[var1, var2], ch[var1, var2]),cex=2*0.8, col=grey(col[2]))  
+}
+
+max_range <- max(apply(results, 2, function(x) { diff(range(x, na.rm=T)) }))
+
+
+scale_panel <- function(x,y,...) {
+  # convert so that everything is on the same scale (range)
+  xr <- range(x, na.rm=T)
+  yr <- range(y, na.rm=T)
+  x1 <- (x - mean(xr)) / max_range * diff(xr) + mean(xr)
+  y1 <- (y - mean(yr)) / max_range * diff(yr) + mean(yr)
+  points(x1, y1, ...)
+}
+
+colour_panel <- function(x, y, labels, cex, font, ...) {
+  x <- x[!is.na(x)]
+  # extend the range by 4%
+  xr <- range(x1) + c(-1,1)*diff(range(x1))*.04
+  rect(-1,-1,1,1, col=party_ctl[labels,]$Contrast, border=NA)
+  text(x, y, labels, cex=1*2)
+}
+
+o <- order(poll == "Election")
+results <- results[o,]
+poll <- poll[o]
+dates <- x_date[o]
+col_start <- "gold" #c("#0000FF")
+col_elect <- "black" #c("#000000")
+col_today <- "brown" #c("#FF0000")
+
+color_before <- colorRamp(c(col_start, col_elect), space="Lab")
+color_after  <- colorRamp(c(col_elect, col_today), space="Lab")
+
+dates_before <- dates < dates[poll == "Election"]
+dates_after  <- dates > dates[poll == "Election"]
+elect_date <- dates[poll=="Election"]
+
+t_before <- as.numeric(dates[dates_before] - min(dates)) / as.numeric(elect_date - min(dates))
+t_after <- as.numeric(dates[dates_after] - elect_date) / as.numeric(max(dates) - elect_date)
+
+col <- rep(col_today, nrow(results))
+col[dates_before] <- paste(rgb(color_before(t_before)/255),"3F",sep="")
+col[poll == "Election"] <- col_elect
+col[dates_after] <- paste(rgb(color_after(t_after)/255),"3F",sep="")
+
+#col <- col[(poll == "Election") + 1]
+png("pairs.png", width=600, height=600)
+par(bty="n", omi=c(0,0,0,0), mai=c(0.5,0.5,0.5,0.5))
+pairs(results, labels=include, col=col, pch=21, bg=col, cex=2, yaxt="n", xaxt="n", gap=0.1, lower.panel=corr_panel, text.panel = colour_panel,
+oma = 10*c(0.25,0.25,0.75,0.25), upper.panel=scale_panel)
+mtext("Party vote correlation in bias-corrected polls", side=3, cex=1.5, line=1.5)
+mtext(paste(min(x_date), "to", max(x_date)), side=3, line=0.2, cex=1.2)
+dev.off()
+
+
+
+
+# Pairs plot of party vote share
+include <- c("Labour", "National", "Green", "NZ First", "Conservative")
+
+get_party_data(include[1])
+b <- rbind(0, bias)
+rownames(b) <- c(rownames(bias), "Election")
+newX <- new_X
+
+poll <- z
+results <- matrix(NA, nrow(newX), length(include))
+colnames(results) <- include
+rownames(results) <- newX$x
+for (i in include)
+{
+  get_party_data(i);
+  results[,i] <- predict(a_list[[i]], newX)
+  # optionally bias correct
+#  results[,i] <- results[,i] - b[poll,i]
+}
+
+corr_panel <- function(x,y,...) {
+  x1 <- x[!is.na(x)]
+  y1 <- y[!is.na(y)]
+  count <<- count + 1
+  # extend the range by 4%
+  xr <- range(x1) + c(-1,1)*diff(range(x1))*.04
+  yr <- range(y1) + c(-1,1)*diff(range(y1))*.04
+  if (cor.test(x,y, use="complete.obs")$p.value < 0.05) {
+    col <- c(.5,.85)
+  } else {
+    col <- c(.7,.9)
+  }
+  cat("col=", col, "\n")
+  rect(xr[1], yr[1], xr[2], yr[2], col=grey(col[2]), border=NA)
+  text(mean(xr), mean(yr), sprintf("%0.2f", cor(x,y, use="complete.obs")),cex=2*2, col=grey(col[1]))
+  
+}
+
+scale_panel <- function(x,y,...) {
+  # convert so that everything is on the same scale (range)
+  x1 <- x[!is.na(x)]
+  y1 <- y[!is.na(y)]
+  xr <- range(x1)
+  yr <- range(y1)
+  x1 <- (x1 - mean(xr)) / max_range * diff(xr) + mean(xr)
+  y1 <- (y1 - mean(yr)) / max_range * diff(yr) + mean(yr)
+  points(x1, y1)
+}
+
+colour_panel <- function(x, y, labels, cex, font, ...) {
+  x <- x[!is.na(x)]
+  # extend the range by 4%
+  xr <- range(x1) + c(-1,1)*diff(range(x1))*.04
+  rect(-1,-1,1,1, col=party_ctl[labels,]$Contrast, border=NA)
+  text(x, y, labels, cex=1*2)
+}
+
+elect_date <- as.numeric(x_date[poll == "Election"])
+#o <- order(poll == "Election")
+#results <- results[o,]
+#poll <- poll[o]
+#dates <- x_date[o]
+col <- c("#0000001F", "black")
+col <- col[(round(newX$x) == elect_date) + 1]
+col[newX$x < elect_date] <- "#0000FF1F";
+png("pairs.png", width=600, height=600)
+par(bty="n", omi=c(0,0,0,0), mai=c(0.5,0.5,0.5,0.5))
+pairs(results, labels=include, col=col, pch=21, bg=col, cex=2, yaxt="n", xaxt="n", gap=0.1, lower.panel=corr_panel, text.panel = colour_panel,
+oma = 10*c(0.25,0.25,0.75,0.25), upper.panel=scale_panel)
+mtext("Party vote correlation in bias-corrected polls", side=3, cex=1.5, line=1.5)
+mtext(paste(min(x_date), "to", max(x_date)), side=3, line=0.2, cex=1.2)
+dev.off()
+
+
